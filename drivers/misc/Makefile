@@ -76,3 +76,5 @@ obj-$(CONFIG_WIGIG_SENSING_SPI)	+= wigig_sensing.o
 obj-$(CONFIG_QTI_MAXIM_FAN_CONTROLLER) += max31760.o
 obj-$(CONFIG_QTI_XR_SMRTVWR_MISC) += qxr-stdalonevwr.o
 obj-$(CONFIG_FPR_FPC)		+= fpr_FingerprintCard/
+obj-$(CONFIG_HW_BOOT_INFO)    += bootinfo.o
+obj-$(CONFIG_HW_PM_DEBUG)    += qpnp-vreg-pm-debug.o

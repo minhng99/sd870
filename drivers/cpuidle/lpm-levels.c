@@ -48,6 +48,12 @@
 #define PSCI_POWER_STATE(reset) (reset << 30)
 #define PSCI_AFFINITY_LEVEL(lvl) ((lvl & 0x3) << 24)
 
+
+#ifdef CONFIG_HW_PM_DEBUG
+extern void gpio_debug_print_enabled(void);
+extern void qpnp_vreg_dump_vregs(void);
+#endif /* CONFIG_HW_PM_DEBUG */
+
 enum {
 	MSM_LPM_LVL_DBG_SUSPEND_LIMITS = BIT(0),
 	MSM_LPM_LVL_DBG_IDLE_LIMITS = BIT(1),
@@ -1747,6 +1753,11 @@ static int lpm_suspend_enter(suspend_state_t state)
 	 */
 	clock_debug_print_enabled();
 	regulator_debug_print_enabled();
+#ifdef CONFIG_HW_PM_DEBUG
+	gpio_debug_print_enabled();
+	qpnp_vreg_dump_vregs();
+#endif /* CONFIG_HW_PM_DEBUG */
+
 
 	cpu_prepare(lpm_cpu, idx, false);
 	cluster_prepare(cluster, cpumask, idx, false, 0);

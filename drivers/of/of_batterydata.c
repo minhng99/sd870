@@ -366,6 +366,8 @@ struct device_node *of_batterydata_get_best_profile(
 					best_id_kohm = batt_ids.kohm[i];
 				}
 			}
+
+
 		}
 	}
 

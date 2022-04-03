@@ -34,7 +34,7 @@
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/module.h>
-
+#include <linux/bootinfo.h>
 #define CREATE_TRACE_POINTS
 #include <trace/events/regulator.h>
 
@@ -5246,9 +5246,13 @@ static int _regulator_debug_print_enabled(struct device *dev, void *data)
  */
 void regulator_debug_print_enabled(void)
 {
+#ifdef CONFIG_HW_PM_DEBUG
+        if((likely(!debug_suspend)) && (!hw_pm_debug_enable()))
+                return;
+#else /* CONFIG_HW_PM_DEBUG */
 	if (likely(!debug_suspend))
 		return;
-
+#endif /* CONFIG_HW_PM_DEBUG */
 	pr_info("Enabled regulators:\n");
 	class_for_each_device(&regulator_class, NULL, NULL,
 			     _regulator_debug_print_enabled);

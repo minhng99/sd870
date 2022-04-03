@@ -25,6 +25,7 @@
 #include <linux/regulator/driver.h>
 #include <linux/regulator/machine.h>
 #include <linux/regulator/of_regulator.h>
+#include "../../../techpack/display/msm/dsi/scaler.h"
 
 #define PMIC_VER_8941				0x01
 #define PMIC_VERSION_REG			0x0105
@@ -701,6 +702,80 @@ out:
 }
 EXPORT_SYMBOL(qpnp_pon_system_pwr_off);
 
+
+#ifdef CONFIG_HW_PM_DEBUG
+/* COMBO KEY TO WARM RESET */
+int qpnp_pon_kpwr_resin_warm_rst_config(int s1_timer, int s2_timer, bool enable)
+{
+
+	struct qpnp_pon *pon = sys_reset_dev;
+	int rc = 0;
+	int i = 0;
+	u16 s2_cntl_addr = 0;
+	u16 s2_cntl2_addr = 0;
+	u16 s1_timer_addr = 0;
+	u16 s2_timer_addr = 0;
+
+	if (!pon)
+		return -ENODEV;
+
+	if (pon->pon_ver == QPNP_PON_GEN1_V1) {
+		s2_cntl_addr = s2_cntl2_addr =
+			QPNP_PON_KPDPWR_RESIN_S2_CNTL(pon);
+	} else {
+		s2_cntl_addr = QPNP_PON_KPDPWR_RESIN_S2_CNTL(pon);
+		s2_cntl2_addr = QPNP_PON_KPDPWR_RESIN_S2_CNTL2(pon);
+	}
+
+	s1_timer_addr = QPNP_PON_KPDPWR_RESIN_S1_TIMER(pon);
+	s2_timer_addr = QPNP_PON_KPDPWR_RESIN_S2_TIMER(pon);
+
+	/* Disable S2 reset */
+	rc = qpnp_pon_masked_write(pon, s2_cntl2_addr, QPNP_PON_S2_CNTL_EN, 0);
+	if (rc)
+		return rc;
+	if (!enable) {
+		pr_info("PON RESIN_AND_KPDPWR S2 DISABLED!\n");
+		return 0;
+	}
+
+	usleep_range(100, 120);
+
+	/* configure s1 timer, s2 timer and reset type */
+	for (i = 0; i < PON_S1_COUNT_MAX + 1; i++) {
+		if (s1_timer <= s1_delay[i])
+			break;
+	}
+	rc = qpnp_pon_masked_write(pon, s1_timer_addr,
+				QPNP_PON_S1_TIMER_MASK, i);
+	if (rc)
+		return rc;
+
+	i = 0;
+	if (s2_timer) {
+		i = s2_timer / 10;
+		i = ilog2(i + 1);
+	}
+
+	rc = qpnp_pon_masked_write(pon, s2_timer_addr, QPNP_PON_S2_TIMER_MASK,
+				   i);
+	if (rc)
+		return rc;
+
+	rc = qpnp_pon_masked_write(pon, s2_cntl_addr,
+				QPNP_PON_S2_CNTL_TYPE_MASK, PON_POWER_OFF_WARM_RESET);
+	if (rc)
+		return rc;
+
+	pr_info("PON RESIN_AND_KPDPWR S2 WARM RESET ENABLE S1:%d S2 %d", s1_timer, s2_timer);
+	/* Enable S2 reset */
+	return qpnp_pon_masked_write(pon, s2_cntl2_addr,
+				     QPNP_PON_S2_CNTL_EN, QPNP_PON_S2_CNTL_EN);
+}
+EXPORT_SYMBOL(qpnp_pon_kpwr_resin_warm_rst_config);
+#endif /* CONFIG_HW_PM_DEBUG */
+
+
 /**
  * qpnp_pon_modem_pwr_off() - shutdown or reset the modem PMIC
  * @type: Determines the type of power off to perform - shutdown, reset, etc
@@ -986,9 +1061,11 @@ static irqreturn_t qpnp_kpdpwr_irq(int irq, void *_pon)
 	int rc;
 	struct qpnp_pon *pon = _pon;
 
+	if(get_connection_status() == DISCONNECTED) {
 	rc = qpnp_pon_input_dispatch(pon, PON_KPDPWR);
 	if (rc)
 		dev_err(pon->dev, "Unable to send input event, rc=%d\n", rc);
+	}
 
 	return IRQ_HANDLED;
 }
@@ -1865,6 +1942,107 @@ static struct kernel_param_ops smpl_en_ops = {
 
 module_param_cb(smpl_en, &smpl_en_ops, &smpl_en, 0600);
 
+#ifdef CONFIG_HW_PM_DEBUG
+
+static bool resin_warm_rst;
+/**
+ * qpnp_pon_resin_warm_rst_config() - config resin as warm reset
+ *
+ * Returns 0 if config successfully.
+ * Returns < 0 for errors
+ *
+ * This function is used to config resin as warm reset source.
+ * Long press resin can enter ramdump if dload_set(download_mode)
+ * or debug build. Pay attention to pm_device_post_init in XBL.
+ **/
+
+static int qpnp_pon_resin_warm_rst_config(bool enable)
+{
+
+	struct qpnp_pon *pon = sys_reset_dev;
+	int rc = 0;
+	u16 rst_en_reg = 0;
+
+	if (!pon)
+		return -ENODEV;
+
+	if (pon->pon_ver == QPNP_PON_GEN1_V1)
+		rst_en_reg = QPNP_PON_RESIN_S2_CNTL(pon);
+	else
+		rst_en_reg = QPNP_PON_RESIN_S2_CNTL2(pon);
+
+
+	rc = qpnp_pon_masked_write(pon, rst_en_reg, QPNP_PON_S2_CNTL_EN, 0);
+	if (rc)
+		return rc;
+
+	/* S2 reset disabled if no */
+	if (!enable)
+		return 0;
+
+	udelay(500);
+
+	/*
+	 * Make sure s3 reset is PWR && RESIN or RESIN s2 may fail
+	 * S3 source is a write once register. If the register has
+	 * been configured by the bootloader then this operation will
+	 * not have an effect.
+	 *
+	 */
+	rc = qpnp_pon_masked_write(pon, QPNP_PON_S3_SRC(pon),
+				QPNP_PON_S3_SRC_MASK, QPNP_PON_S3_SRC_KPDPWR_AND_RESIN);
+	if (rc)
+		return rc;
+	/* S1 Timer:0xF-10s S2 Timer:0xF-2S Total 12S */
+	rc = qpnp_pon_masked_write(pon, QPNP_PON_RESIN_S1_TIMER(pon),
+			QPNP_PON_S1_TIMER_MASK, QPNP_PON_S1_TIMER_MASK);
+	if (rc)
+		return rc;
+
+	rc = qpnp_pon_masked_write(pon, QPNP_PON_RESIN_S2_TIMER(pon),
+			QPNP_PON_S2_TIMER_MASK, QPNP_PON_S2_TIMER_MASK);
+	if (rc)
+		return rc;
+
+	rc = qpnp_pon_masked_write(pon, QPNP_PON_RESIN_S2_CNTL(pon),
+				   QPNP_PON_S2_CNTL_TYPE_MASK, PON_POWER_OFF_WARM_RESET);
+	if (rc)
+		return rc;
+
+	rc = qpnp_pon_masked_write(pon, rst_en_reg, QPNP_PON_S2_CNTL_EN,
+				   QPNP_PON_S2_CNTL_EN);
+
+	pr_info("PON:RESIN WARM RESET CONFIG DONE\n");
+	return rc;
+}
+
+static int qpnp_pon_resin_warm_rst_set(const char *val, const struct kernel_param *kp)
+{
+	int rc;
+
+	rc = param_set_bool(val, kp);
+	if (rc < 0) {
+		pr_err("Unable to set smpl_en rc=%d\n", rc);
+		return rc;
+	}
+
+	if (!sys_reset_dev)
+		return -ENODEV;
+
+	return qpnp_pon_resin_warm_rst_config(*(bool *)kp->arg);
+}
+
+static struct kernel_param_ops resin_warm_rst_ops = {
+	.set = qpnp_pon_resin_warm_rst_set,
+	/* also can be gotton via regmap */
+	.get = param_get_bool,
+};
+
+module_param_cb(resin_warm_rst, &resin_warm_rst_ops, &resin_warm_rst, 0600);
+#endif /* CONFIG_HW_PM_DEBUG */
+
+
+
 static bool dload_on_uvlo;
 
 static int
@@ -2335,7 +2513,6 @@ static int qpnp_pon_probe(struct platform_device *pdev)
 		dev_err(dev, "Unable to read debounce delay, rc=%d\n", rc);
 		return rc;
 	}
-
 	rc = qpnp_pon_get_dbc(pon, &pon->dbc_time_us);
 	if (rc)
 		return rc;

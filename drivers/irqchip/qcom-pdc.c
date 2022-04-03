@@ -78,8 +78,8 @@ static void qcom_pdc_gic_disable(struct irq_data *d)
 	if (d->hwirq == GPIO_NO_WAKE_IRQ)
 		return;
 
-	pdc_enable_intr(d, false);
 	irq_chip_disable_parent(d);
+	pdc_enable_intr(d, false);
 }
 
 static int qcom_pdc_gic_get_irqchip_state(struct irq_data *d,

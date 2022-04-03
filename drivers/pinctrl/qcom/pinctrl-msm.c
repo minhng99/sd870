@@ -44,6 +44,15 @@
 #define PS_HOLD_OFFSET 0x820
 #define QUP_MASK       GENMASK(5, 0)
 
+#define SEQ_printf(m, x...)			\
+  do {						\
+	if (m)					\
+		seq_printf(m, x);		\
+	else					\
+		pr_info(x);			\
+  } while (0)
+
+
 /**
  * struct msm_pinctrl - state for a pinctrl-msm device
  * @dev:            device handle.
@@ -524,6 +533,10 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	int drive;
 	int pull;
 	int val;
+#ifdef CONFIG_HW_PM_DEBUG
+	int irq_enable;
+	u32 intr_reg;
+#endif /* CONFIG_HW_PM_DEBUG */
 	u32 ctl_reg, io_reg;
 
 	static const char * const pulls_keeper[] = {
@@ -556,6 +569,16 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	else
 		val = !!(io_reg & BIT(g->in_bit));
 
+#ifdef CONFIG_HW_PM_DEBUG
+	/* Kona doesn't have dirr conn gpios,should add bitmap for
+	 other platforms during dirr conn irq mask/unmask (enable)*/
+	intr_reg = readl(pctrl->regs + g->intr_cfg_reg);
+	irq_enable = !!(intr_reg & BIT(g->intr_enable_bit));
+	SEQ_printf(s, " %-8s: %-3s  %-4s func%d  %dmA  %s  Int %d \n", g->name, is_out ? "out" : "in",
+		val ? "high" : "low", func, msm_regval_to_drive(drive),
+		pctrl->soc->pull_no_keeper ? pulls_no_keeper[pull] : pulls_keeper[pull],
+		irq_enable);
+#else /* CONFIG_HW_PM_DEBUG */
 	seq_printf(s, " %-8s: %-3s", g->name, is_out ? "out" : "in");
 	seq_printf(s, " %-4s func%d", val ? "high" : "low", func);
 	seq_printf(s, " %dmA", msm_regval_to_drive(drive));
@@ -564,15 +587,34 @@ static void msm_gpio_dbg_show_one(struct seq_file *s,
 	else
 		seq_printf(s, " %s", pulls_keeper[pull]);
 	seq_puts(s, "\n");
+#endif /* CONFIG_HW_PM_DEBUG */
 }
 
 static void msm_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 {
 	unsigned gpio = chip->base;
 	unsigned i;
+	const char *label;
 
-	for (i = 0; i < chip->ngpio; i++, gpio++)
+	for (i = 0; i < chip->ngpio; i++, gpio++) {
+#ifdef CONFIG_HW_PM_DEBUG
+		if(s) {
+			label = gpiochip_is_requested(chip, i);
+			if(!label)
+				continue;
+		}
+		/* Perfer to dump all gpios in s3 even no requests in HLOS.
+		It May cause crash if gpio on TZ Side But BladeX doesn't
+		have any GPIO on TZ(FP/ESE). Indeed We can pass protect gpio
+		array in DTS by read_u32_array for other pros */
+#else /* CONFIG_HW_PM_DEBUG */
+		label = gpiochip_is_requested(chip, i);
+		if(!label) {
+			continue;
+		}
+#endif /* CONFIG_HW_PM_DEBUG */
 		msm_gpio_dbg_show_one(s, NULL, chip, i, gpio);
+	}
 }
 
 #else

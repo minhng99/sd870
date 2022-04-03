@@ -403,6 +403,7 @@ struct smb_charger {
 	struct power_supply		*usb_psy;
 	struct power_supply		*dc_psy;
 	struct power_supply		*bms_psy;
+	struct power_supply		*exfg_psy;
 	struct power_supply		*usb_main_psy;
 	struct power_supply		*usb_port_psy;
 	struct power_supply		*wls_psy;
@@ -470,7 +471,14 @@ struct smb_charger {
 	struct delayed_work	pr_swap_detach_work;
 	struct delayed_work	pr_lock_clear_work;
 	struct delayed_work	role_reversal_check;
+#ifdef CONFIG_QPNP_FACTORY_CHG_CTRL
+	struct delayed_work	factory_work;
+#endif /* CONFIG_QPNP_FACTORY_CHG_CTRL */
 
+#ifdef CONFIG_QPNP_FLOAT_CHG_RECHECK
+	struct delayed_work	float_chg_work;
+	bool			float_checked;
+#endif /* CONFIG_QPNP_FLOAT_CHG_RECHECK */
 	struct alarm		lpd_recheck_timer;
 	struct alarm		moisture_protection_alarm;
 	struct alarm		chg_termination_alarm;
@@ -615,6 +623,8 @@ struct smb_charger {
 	int			dcin_uv_count;
 	ktime_t			dcin_uv_last_time;
 	int			last_wls_vout;
+	/**/
+	int 			debug_temp;
 };
 
 int smblib_read(struct smb_charger *chg, u16 addr, u8 *val);
@@ -819,6 +829,10 @@ int smblib_typec_port_type_set(const struct typec_capability *cap,
 int smblib_get_prop_from_bms(struct smb_charger *chg,
 				enum power_supply_property psp,
 				union power_supply_propval *val);
+int smblib_get_prop_from_exfg(struct smb_charger *chg,
+				enum power_supply_property psp,
+				union power_supply_propval *val);
+int smblib_get_prop_exfg_use(struct smb_charger *chg, union power_supply_propval *val);
 int smblib_get_iio_channel(struct smb_charger *chg, const char *propname,
 					struct iio_channel **chan);
 int smblib_read_iio_channel(struct smb_charger *chg, struct iio_channel *chan,

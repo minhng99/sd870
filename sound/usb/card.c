@@ -666,6 +666,13 @@ static int usb_audio_probe(struct usb_interface *intf,
 	int ifnum;
 	u32 id;
 
+	if (!snd_cards[1] || !(snd_cards[1]->id[0])) {
+		dev_info(&dev->dev,
+			"%s: Defering usb card probe, wait secondary card...\n",
+			__func__);
+		return -EPROBE_DEFER;
+	}
+
 	alts = &intf->altsetting[0];
 	ifnum = get_iface_desc(alts)->bInterfaceNumber;
 	id = USB_ID(le16_to_cpu(dev->descriptor.idVendor),

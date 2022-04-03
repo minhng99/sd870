@@ -289,10 +289,41 @@ static const struct of_device_id bq27xxx_battery_i2c_of_match_table[] = {
 MODULE_DEVICE_TABLE(of, bq27xxx_battery_i2c_of_match_table);
 #endif
 
+
+/* i2c bus error occur if do ops before resume */
+static int bq27xxx_battery_i2c_suspend(struct device *dev)
+{
+	struct bq27xxx_device_info *di = dev_get_drvdata(dev);
+
+	pr_debug("bq27xxx suspend,cancel poll work\n");
+	cancel_delayed_work_sync(&di->work);
+
+	return 0;
+}
+
+static int bq27xxx_battery_i2c_resume(struct device *dev)
+{
+	struct bq27xxx_device_info *di = dev_get_drvdata(dev);
+
+	/* bq27xxx_battery_get_property may call poll work */
+	cancel_delayed_work_sync(&di->work);
+
+	pr_debug("bq27xxx resume,schedule poll work\n");
+	schedule_delayed_work(&di->work, 0);
+
+	return 0;
+}
+
+static const struct dev_pm_ops bq27xxx_battery_i2c_pm_ops = {
+	.suspend = bq27xxx_battery_i2c_suspend,
+	.resume  = bq27xxx_battery_i2c_resume,
+};
+
 static struct i2c_driver bq27xxx_battery_i2c_driver = {
 	.driver = {
 		.name = "bq27xxx-battery",
 		.of_match_table = of_match_ptr(bq27xxx_battery_i2c_of_match_table),
+		.pm = &bq27xxx_battery_i2c_pm_ops,
 	},
 	.probe = bq27xxx_battery_i2c_probe,
 	.remove = bq27xxx_battery_i2c_remove,

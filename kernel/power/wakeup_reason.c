@@ -349,6 +349,27 @@ static struct attribute_group attr_group = {
 	.attrs = attrs,
 };
 
+
+#ifdef CONFIG_HW_PM_DEBUG
+static void pm_debug_show_sleep_time(void)
+{
+
+	struct timespec s_time;
+	struct timespec t_time;
+	struct timespec e_time;
+
+	if (suspend_abort)
+		return;
+
+	t_time = ktime_to_timespec(ktime_sub(curr_stime, last_stime));
+	e_time = ktime_to_timespec(ktime_sub(curr_monotime, last_monotime));
+	s_time = timespec_sub(t_time, e_time);
+	pr_info("Last Sleep Elasped:%lu.%09lu (%lu.%09lu)\n",
+				t_time.tv_sec, t_time.tv_nsec,
+				s_time.tv_sec, s_time.tv_nsec);
+}
+#endif /* CONFIG_HW_PM_DEBUG */
+
 /* Detects a suspend and clears all the previous wake up reasons*/
 static int wakeup_reason_pm_event(struct notifier_block *notifier,
 		unsigned long pm_event, void *unused)
@@ -366,6 +387,9 @@ static int wakeup_reason_pm_event(struct notifier_block *notifier,
 		curr_monotime = ktime_get();
 		/* monotonic time since boot including the time spent in suspend */
 		curr_stime = ktime_get_boottime();
+#ifdef CONFIG_HW_PM_DEBUG
+		pm_debug_show_sleep_time();
+#endif /* CONFIG_HW_PM_DEBUG */
 		print_wakeup_sources();
 		break;
 	default:

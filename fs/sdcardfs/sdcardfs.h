@@ -202,6 +202,8 @@ struct sdcardfs_mount_options {
 	bool default_normal;
 	bool unshared_obb;
 	unsigned int reserved_mb;
+	///FW: STORAGE reserved space 20201203 1-4
+	uid_t reserved_uid;
 	bool nocache;
 };
 
@@ -610,10 +612,23 @@ static inline int check_min_free_space(struct dentry *dentry, size_t size, int d
 		if ((u64)size > avail)
 			return 0;
 
+		///FW: STORAGE reserved space 20201203 1-4 start@{
+		if (sbi->options.reserved_uid) {
+			uid_t current_uid = from_kuid(&init_user_ns, current_uid());
+			if (current_uid >= sbi->options.reserved_uid) {
+				if ((avail - size) > (sbi->options.reserved_mb * 1024 * 1024))
+					return 1;
+			} else {
+				return 1;
+			}
+		} else {
+
 		/* enough space */
 		if ((avail - size) > (sbi->options.reserved_mb * 1024 * 1024))
 			return 1;
 
+		} /* add for limit write to data partition */
+		///FW: STORAGE reserved space 20201203 1-4 end@}
 		return 0;
 	} else
 		return 1;

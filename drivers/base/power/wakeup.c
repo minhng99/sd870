@@ -22,7 +22,7 @@
 #include <linux/irq.h>
 #include <linux/interrupt.h>
 #include <linux/irqdesc.h>
-
+#include <linux/bootinfo.h>
 #include "power.h"
 
 #ifndef CONFIG_SUSPEND
@@ -861,7 +861,14 @@ void pm_print_active_wakeup_sources(void)
 	srcuidx = srcu_read_lock(&wakeup_srcu);
 	list_for_each_entry_rcu(ws, &wakeup_sources, entry) {
 		if (ws->active) {
+#ifdef CONFIG_HW_PM_DEBUG
+			if(hw_pm_debug_enable())
+				pr_info("active wakeup source: %s\n", ws->name);
+			else
+				pr_debug("active wakeup source: %s\n", ws->name);
+#else	/* CONFIG_HW_PM_DEBUG */
 			pr_debug("active wakeup source: %s\n", ws->name);
+#endif  /* CONFIG_HW_PM_DEBUG */
 			active = 1;
 		} else if (!active &&
 			   (!last_activity_ws ||
@@ -872,8 +879,19 @@ void pm_print_active_wakeup_sources(void)
 	}
 
 	if (!active && last_activity_ws)
+#ifdef CONFIG_HW_PM_DEBUG
+	{
+		if(hw_pm_debug_enable())
+			pr_info("last active wakeup source: %s\n",
+				last_activity_ws->name);
+		else
+			pr_debug("last active wakeup source: %s\n",
+				last_activity_ws->name);
+	}
+#else	/* CONFIG_HW_PM_DEBUG */
 		pr_debug("last active wakeup source: %s\n",
 			last_activity_ws->name);
+#endif  /* CONFIG_HW_PM_DEBUG */
 	srcu_read_unlock(&wakeup_srcu, srcuidx);
 }
 EXPORT_SYMBOL_GPL(pm_print_active_wakeup_sources);

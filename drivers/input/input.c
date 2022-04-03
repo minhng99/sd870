@@ -415,6 +415,26 @@ static void input_handle_event(struct input_dev *dev,
 
 }
 
+#ifdef CONFIG_HW_PM_DEBUG
+static void input_report_keyevent_log(unsigned int type,
+					unsigned int code, int value)
+{
+	int i = 0;
+	const char * const keyname[] = {
+		"Volum Down",
+		"Volum Up",
+		"Power",
+	};
+	if (type != EV_KEY)
+		return;
+	if ((code < KEY_VOLUMEDOWN) || (code > KEY_POWER))
+		return;
+	i = code - KEY_VOLUMEDOWN;
+	if (i <= (KEY_POWER - KEY_VOLUMEDOWN))
+		pr_info("%s key %s\n", keyname[i], value ? "Press" : "Release");
+}
+#endif /* CONFIG_HW_PM_DEBUG */
+
 /**
  * input_event() - report new input event
  * @dev: device that generated the event
@@ -436,7 +456,9 @@ void input_event(struct input_dev *dev,
 		 unsigned int type, unsigned int code, int value)
 {
 	unsigned long flags;
-
+#ifdef CONFIG_HW_PM_DEBUG
+	input_report_keyevent_log(type, code, value);
+#endif /* CONFIG_HW_PM_DEBUG */
 	if (is_event_supported(type, dev->evbit, EV_MAX)) {
 
 		spin_lock_irqsave(&dev->event_lock, flags);

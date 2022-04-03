@@ -110,6 +110,15 @@
 #define PMIC_GPIO_CONF_ATEST			(PIN_CONFIG_END + 3)
 #define PMIC_GPIO_CONF_ANALOG_PASS		(PIN_CONFIG_END + 4)
 #define PMIC_GPIO_CONF_DTEST_BUFFER		(PIN_CONFIG_END + 5)
+#define SEQ_printf(m, x...)                     \
+  do {                                          \
+        if (m)                                  \
+                seq_printf(m, x);               \
+        else                                    \
+                pr_info(x);                     \
+  } while (0)
+
+
 
 /* The index of each function in pmic_gpio_functions[] array */
 enum pmic_gpio_func_index {
@@ -646,7 +655,38 @@ static void pmic_gpio_config_dbg_show(struct pinctrl_dev *pctldev,
 	};
 
 	pad = pctldev->desc->pins[pin].drv_data;
+#ifdef CONFIG_HW_PM_DEBUG
+	val = pmic_gpio_read(state, pad, PMIC_GPIO_REG_EN_CTL);
 
+	if (val < 0 || !(val >> PMIC_GPIO_REG_MASTER_EN_SHIFT)) {
+		SEQ_printf(s, " gpio%-2d: --- \n", pad->gpio_idx);
+	} else {
+		if (pad->input_enabled) {
+			ret = pmic_gpio_read(state, pad, PMIC_MPP_REG_RT_STS);
+			if (ret < 0)
+				return;
+
+			ret &= PMIC_MPP_REG_RT_STS_VAL_MASK;
+			pad->out_value = ret;
+		}
+		/*
+		 * For the non-LV/MV subtypes only 2 special functions are
+		 * available, offsetting the dtest function values by 2.
+		 */
+		function = pad->function;
+		if (!pad->lv_mv_type &&
+				pad->function >= PMIC_GPIO_FUNC_INDEX_FUNC3)
+			function += PMIC_GPIO_FUNC_INDEX_DTEST1 -
+				PMIC_GPIO_FUNC_INDEX_FUNC3;
+
+		SEQ_printf(s, " gpio%-2d: %12s %-7s vin-%d %-27s %-10s %-4s %-7s atest-%d dtest-%d \n",
+			pad->gpio_idx, pad->analog_pass ? "analog-pass": (pad->output_enabled ? "out" : "in"),
+			pmic_gpio_functions[function], pad->power_source, biases[pad->pullup],
+			buffer_types[pad->buffer_type], pad->out_value ? "high" : "low",
+			strengths[pad->strength], pad->atest, pad->dtest_buffer);
+	}
+
+#else /* CONFIG_HW_PM_DEBUG */
 	seq_printf(s, " gpio%-2d:", pad->gpio_idx);
 
 	val = pmic_gpio_read(state, pad, PMIC_GPIO_REG_EN_CTL);
@@ -686,6 +726,7 @@ static void pmic_gpio_config_dbg_show(struct pinctrl_dev *pctldev,
 		seq_printf(s, " atest-%d", pad->atest);
 		seq_printf(s, " dtest-%d", pad->dtest_buffer);
 	}
+#endif /* CONFIG_HW_PM_DEBUG */
 }
 
 static const struct pinconf_ops pmic_gpio_pinconf_ops = {
@@ -794,7 +835,9 @@ static void pmic_gpio_dbg_show(struct seq_file *s, struct gpio_chip *chip)
 
 	for (i = 0; i < chip->ngpio; i++) {
 		pmic_gpio_config_dbg_show(state->ctrl, s, i);
+#ifndef CONFIG_HW_PM_DEBUG
 		seq_puts(s, "\n");
+#endif /* CONFIG_HW_PM_DEBUG */
 	}
 }
 

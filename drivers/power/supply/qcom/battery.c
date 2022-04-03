@@ -971,7 +971,7 @@ static int pl_fcc_vote_callback(struct votable *votable, void *data,
 	 * Main charger FCC is userspace's override vote on main.
 	 */
 	cp_fcc_ua = total_fcc_ua - chip->chg_param->forced_main_fcc;
-	pl_dbg(chip, PR_PARALLEL,
+	pr_err(
 		"cp_fcc_ua=%d total_fcc_ua=%d forced_main_fcc=%d\n",
 		cp_fcc_ua, total_fcc_ua, chip->chg_param->forced_main_fcc);
 	if (cp_fcc_ua > 0) {

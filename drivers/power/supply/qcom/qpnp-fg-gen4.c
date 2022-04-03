@@ -321,6 +321,9 @@ struct fg_gen4_chip {
 	bool			vbatt_low;
 	bool			chg_term_good;
 	bool			soc_scale_mode;
+#ifdef CONFIG_BATTERY_BQ27XXX
+	struct power_supply	*bq_psy;
+#endif /* CONFIG_BATTERY_BQ27XXX */
 };
 
 struct bias_config {
@@ -736,6 +739,7 @@ static int fg_gen4_get_learned_capacity(void *data, int64_t *learned_cap_uah)
 
 #define CC_SOC_30BIT	GENMASK(29, 0)
 #define BATT_SOC_32BIT	GENMASK(31, 0)
+#ifndef CONFIG_BATTERY_BQ27XXX
 static int fg_gen4_get_charge_raw(struct fg_gen4_chip *chip, int *val)
 {
 	int rc, cc_soc;
@@ -799,6 +803,8 @@ static int fg_gen4_get_charge_counter_shadow(struct fg_gen4_chip *chip,
 	*val = div_u64((u32)batt_soc * learned_cap_uah, BATT_SOC_32BIT);
 	return 0;
 }
+#endif /* CONFIG_BATTERY_BQ27XXX */
+
 
 static int fg_gen4_get_battery_temp(struct fg_dev *fg, int *val)
 {
@@ -987,6 +993,7 @@ static int fg_gen4_get_prop_capacity(struct fg_dev *fg, int *val)
 
 	if (chip->vbatt_low) {
 		*val = EMPTY_SOC;
+		pr_err("chip->vbatt_low-EMPTY_SOC %d\n", EMPTY_SOC);
 		return 0;
 	}
 
@@ -1069,6 +1076,7 @@ static inline void get_esr_meas_current(int curr_ma, u8 *val)
 	*val <<= ESR_PULL_DOWN_IVAL_SHIFT;
 }
 
+#ifndef CONFIG_BATTERY_BQ27XXX
 static int fg_gen4_get_power(struct fg_gen4_chip *chip, int *val, bool average)
 {
 	struct fg_dev *fg = &chip->fg;
@@ -1105,6 +1113,7 @@ static int fg_gen4_get_power(struct fg_gen4_chip *chip, int *val, bool average)
 	*val = power;
 	return 0;
 }
+#endif  /* CONFIG_BATTERY_BQ27XXX */
 
 static int fg_gen4_get_prop_soc_scale(struct fg_gen4_chip *chip)
 {
@@ -3524,7 +3533,7 @@ static irqreturn_t fg_vbatt_low_irq_handler(int irq, void *data)
 	if (rc < 0)
 		return IRQ_HANDLED;
 
-	fg_dbg(fg, FG_IRQ, "irq %d triggered vbatt_mv: %d msoc_raw:%d\n", irq,
+	pr_err("irq %d triggered vbatt_mv: %d msoc_raw:%d\n", irq,
 		vbatt_mv, msoc_raw);
 
 	if (!fg->soc_reporting_ready) {
@@ -4454,6 +4463,29 @@ static struct attribute *fg_attrs[] = {
 };
 ATTRIBUTE_GROUPS(fg);
 
+#ifdef CONFIG_BATTERY_BQ27XXX
+int bq_psy_get_property(struct fg_gen4_chip *chip,
+				enum power_supply_property psp,
+				union power_supply_propval *val)
+{
+	int rc = 0;
+
+	if (!chip->bq_psy){
+		pr_info("fg4:bq fg get failed during probe,re-geting\n");
+		chip->bq_psy = power_supply_get_by_name("bq27541-0");
+	}
+
+	if (!chip->bq_psy) {
+		pr_err("fg4:bq fg not found\n");
+		return -ENODEV;
+	}
+	rc = power_supply_get_property(chip->bq_psy, psp, val);
+	return rc;
+}
+
+
+#endif /* CONFIG_BATTERY_BQ27XXX */
+
 /* All power supply functions here */
 
 static int fg_psy_get_property(struct power_supply *psy,
@@ -4466,8 +4498,15 @@ static int fg_psy_get_property(struct power_supply *psy,
 	int64_t temp;
 
 	switch (psp) {
+	/* Fix curr/soc/full_charge for hvdcp_opti */
 	case POWER_SUPPLY_PROP_CAPACITY:
+#ifdef CONFIG_BATTERY_BQ27XXX
+		rc = bq_psy_get_property(chip, POWER_SUPPLY_PROP_CAPACITY, pval);
+		if (rc)
+			rc = fg_gen4_get_prop_capacity(fg, &pval->intval);
+#else  /* CONFIG_BATTERY_BQ27XXX */
 		rc = fg_gen4_get_prop_capacity(fg, &pval->intval);
+#endif /* CONFIG_BATTERY_BQ27XXX */
 		break;
 	case POWER_SUPPLY_PROP_REAL_CAPACITY:
 		rc = fg_gen4_get_prop_real_capacity(fg, &pval->intval);
@@ -4491,11 +4530,21 @@ static int fg_psy_get_property(struct power_supply *psy,
 			rc = fg_get_battery_voltage(fg, &pval->intval);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
+#ifdef CONFIG_BATTERY_BQ27XXX
+		rc = bq_psy_get_property(chip, POWER_SUPPLY_PROP_CURRENT_NOW, pval);
+		if (rc)
+			rc = fg_get_battery_current(fg, &pval->intval);
+		else
+			pval->intval *= (-1);
+#else  /* CONFIG_BATTERY_BQ27XXX */
 		rc = fg_get_battery_current(fg, &pval->intval);
+#endif /* CONFIG_BATTERY_BQ27XXX */
 		break;
+#ifndef CONFIG_BATTERY_BQ27XXX
 	case POWER_SUPPLY_PROP_CURRENT_AVG:
 		rc = fg_get_sram_prop(fg, FG_SRAM_IBAT_FLT, &pval->intval);
 		break;
+#endif  /* CONFIG_BATTERY_BQ27XXX */
 	case POWER_SUPPLY_PROP_TEMP:
 		rc = fg_gen4_get_battery_temp(fg, &pval->intval);
 		break;
@@ -4523,28 +4572,56 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN:
 		pval->intval = fg->bp.float_volt_uv;
 		break;
+#ifndef CONFIG_BATTERY_BQ27XXX
 	case POWER_SUPPLY_PROP_CHARGE_NOW_RAW:
 		rc = fg_gen4_get_charge_raw(chip, &pval->intval);
 		break;
+#endif /* CONFIG_BATTERY_BQ27XXX */
 	case POWER_SUPPLY_PROP_CHARGE_NOW:
+#ifdef CONFIG_BATTERY_BQ27XXX
+		rc = bq_psy_get_property(chip, POWER_SUPPLY_PROP_CHARGE_NOW, pval);
+		if (rc)
+			rc = chip->cl->init_cap_uah;
+#else  /* CONFIG_BATTERY_BQ27XXX */
 		pval->intval = chip->cl->init_cap_uah;
+#endif /* CONFIG_BATTERY_BQ27XXX */
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
+#ifdef CONFIG_BATTERY_BQ27XXX
+		rc = bq_psy_get_property(chip, POWER_SUPPLY_PROP_CHARGE_FULL, pval);
+		if (rc) {
+			rc = fg_gen4_get_learned_capacity(chip, &temp);
+			if (!rc)
+				pval->intval = (int)temp;
+		}
+#else  /* CONFIG_BATTERY_BQ27XXX */
 		rc = fg_gen4_get_learned_capacity(chip, &temp);
 		if (!rc)
 			pval->intval = (int)temp;
+#endif /* CONFIG_BATTERY_BQ27XXX */
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
+#ifdef CONFIG_BATTERY_BQ27XXX
+		rc = bq_psy_get_property(chip, POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN, pval);
+		if (rc) {
+			rc = fg_gen4_get_nominal_capacity(chip, &temp);
+			if (!rc)
+				pval->intval = (int)temp;
+		}
+#else  /* CONFIG_BATTERY_BQ27XXX */
 		rc = fg_gen4_get_nominal_capacity(chip, &temp);
 		if (!rc)
 			pval->intval = (int)temp;
+#endif /* CONFIG_BATTERY_BQ27XXX */
 		break;
+#ifndef CONFIG_BATTERY_BQ27XXX
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
 		rc = fg_gen4_get_charge_counter(chip, &pval->intval);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER_SHADOW:
 		rc = fg_gen4_get_charge_counter_shadow(chip, &pval->intval);
 		break;
+#endif /* CONFIG_BATTERY_BQ27XXX */
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
 		rc = get_cycle_count(chip->counter, &pval->intval);
 		break;
@@ -4568,14 +4645,22 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_CONSTANT_CHARGE_VOLTAGE:
 		rc = fg_get_sram_prop(fg, FG_SRAM_VBATT_FULL, &pval->intval);
 		break;
+#ifndef CONFIG_BATTERY_BQ27XXX
 	case POWER_SUPPLY_PROP_TIME_TO_FULL_AVG:
 		rc = ttf_get_time_to_full(chip->ttf, &pval->intval);
 		break;
 	case POWER_SUPPLY_PROP_TIME_TO_FULL_NOW:
 		rc = ttf_get_time_to_full(chip->ttf, &pval->intval);
 		break;
+#endif /* CONFIG_BATTERY_BQ27XXX */
 	case POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG:
+#ifdef CONFIG_BATTERY_BQ27XXX
+		rc = bq_psy_get_property(chip, POWER_SUPPLY_PROP_TIME_TO_EMPTY_AVG, pval);
+		if (rc)
+			rc = ttf_get_time_to_empty(chip->ttf, &pval->intval);
+#else  /* CONFIG_BATTERY_BQ27XXX */
 		rc = ttf_get_time_to_empty(chip->ttf, &pval->intval);
+#endif /* CONFIG_BATTERY_BQ27XXX */
 		break;
 	case POWER_SUPPLY_PROP_CC_STEP:
 		if ((chip->ttf->cc_step.sel >= 0) &&
@@ -4597,12 +4682,14 @@ static int fg_psy_get_property(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_SCALE_MODE_EN:
 		pval->intval = chip->soc_scale_mode;
 		break;
+#ifndef CONFIG_BATTERY_BQ27XXX
 	case POWER_SUPPLY_PROP_POWER_NOW:
 		rc = fg_gen4_get_power(chip, &pval->intval, false);
 		break;
 	case POWER_SUPPLY_PROP_POWER_AVG:
 		rc = fg_gen4_get_power(chip, &pval->intval, true);
 		break;
+#endif /* CONFIG_BATTERY_BQ27XXX */
 	case POWER_SUPPLY_PROP_CALIBRATE:
 		pval->intval = chip->calib_level;
 		break;
@@ -4738,7 +4825,9 @@ static enum power_supply_property fg_psy_props[] = {
 	POWER_SUPPLY_PROP_VOLTAGE_OCV,
 	POWER_SUPPLY_PROP_VOLTAGE_AVG,
 	POWER_SUPPLY_PROP_CURRENT_NOW,
+#ifndef CONFIG_BATTERY_BQ27XXX
 	POWER_SUPPLY_PROP_CURRENT_AVG,
+#endif  /* CONFIG_BATTERY_BQ27XXX */
 	POWER_SUPPLY_PROP_RESISTANCE_ID,
 	POWER_SUPPLY_PROP_RESISTANCE,
 	POWER_SUPPLY_PROP_ESR_ACTUAL,
@@ -4746,11 +4835,15 @@ static enum power_supply_property fg_psy_props[] = {
 	POWER_SUPPLY_PROP_BATTERY_TYPE,
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
 	POWER_SUPPLY_PROP_VOLTAGE_MAX_DESIGN,
+#ifndef CONFIG_BATTERY_BQ27XXX
 	POWER_SUPPLY_PROP_CHARGE_NOW_RAW,
+#endif  /* CONFIG_BATTERY_BQ27XXX */
 	POWER_SUPPLY_PROP_CHARGE_NOW,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
+#ifndef CONFIG_BATTERY_BQ27XXX
 	POWER_SUPPLY_PROP_CHARGE_COUNTER,
 	POWER_SUPPLY_PROP_CHARGE_COUNTER_SHADOW,
+#endif  /* CONFIG_BATTERY_BQ27XXX */
 	POWER_SUPPLY_PROP_CYCLE_COUNTS,
 	POWER_SUPPLY_PROP_SOC_REPORTING_READY,
 	POWER_SUPPLY_PROP_CLEAR_SOH,
@@ -4763,8 +4856,10 @@ static enum power_supply_property fg_psy_props[] = {
 	POWER_SUPPLY_PROP_CC_STEP,
 	POWER_SUPPLY_PROP_CC_STEP_SEL,
 	POWER_SUPPLY_PROP_BATT_AGE_LEVEL,
+#ifndef CONFIG_BATTERY_BQ27XXX
 	POWER_SUPPLY_PROP_POWER_NOW,
 	POWER_SUPPLY_PROP_POWER_AVG,
+#endif  /* CONFIG_BATTERY_BQ27XXX */
 	POWER_SUPPLY_PROP_SCALE_MODE_EN,
 	POWER_SUPPLY_PROP_CALIBRATE,
 };
@@ -6416,7 +6511,11 @@ static int fg_gen4_probe(struct platform_device *pdev)
 		schedule_delayed_work(&fg->profile_load_work, 0);
 
 	fg_gen4_post_init(chip);
-
+#ifdef CONFIG_BATTERY_BQ27XXX
+	chip->bq_psy = power_supply_get_by_name("bq27541-0");
+	if (!chip->bq_psy)
+		pr_info("fg4:bq psy not ready,should reget on usage\n");
+#endif /* CONFIG_BATTERY_BQ27XXX */
 	pr_debug("FG GEN4 driver probed successfully\n");
 	return 0;
 exit:

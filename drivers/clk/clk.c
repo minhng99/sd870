@@ -28,7 +28,7 @@
 #include <linux/of_platform.h>
 #include <linux/pm_opp.h>
 #include <linux/regulator/consumer.h>
-
+#include <linux/bootinfo.h>
 #include "clk.h"
 
 static DEFINE_SPINLOCK(enable_lock);
@@ -3944,9 +3944,13 @@ static void clk_debug_unregister(struct clk_core *core)
  */
 void clock_debug_print_enabled(void)
 {
+#ifdef CONFIG_HW_PM_DEBUG
+	if((likely(!debug_suspend)) && (!hw_pm_debug_enable()))
+		return;
+#else /* CONFIG_HW_PM_DEBUG */
 	if (likely(!debug_suspend))
 		return;
-
+#endif /* CONFIG_HW_PM_DEBUG */
 	clock_debug_print_enabled_clocks(NULL);
 }
 EXPORT_SYMBOL_GPL(clock_debug_print_enabled);

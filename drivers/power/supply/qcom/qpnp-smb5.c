@@ -20,6 +20,7 @@
 #include <linux/iio/consumer.h>
 #include <linux/pmic-voter.h>
 #include <linux/usb/typec.h>
+#include <linux/bootinfo.h>
 #include "smb5-reg.h"
 #include "smb5-lib.h"
 #include "schgm-flash.h"
@@ -147,7 +148,7 @@ static struct smb_params smb5_pm8150b_params = {
 		.name	= "usb otg current limit",
 		.reg	= DCDC_OTG_CURRENT_LIMIT_CFG_REG,
 		.min_u	= 500000,
-		.max_u	= 3000000,
+		.max_u	= 2000000,
 		.step_u	= 500000,
 	},
 	.dc_icl		= {
@@ -228,6 +229,13 @@ struct smb5 {
 };
 
 static int __debug_mask;
+static int __debug_flag = 0;
+module_param_named(
+	debug_flag, __debug_flag, int, 0600
+);
+#ifdef CONFIG_HW_BOOT_INFO
+extern int register_hardware_info(const char *name, const char *model);
+#endif
 
 static ssize_t pd_disabled_show(struct device *dev, struct device_attribute
 				*attr, char *buf)
@@ -1721,14 +1729,18 @@ static enum power_supply_property smb5_batt_props[] = {
 	POWER_SUPPLY_PROP_DP_DM,
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT_MAX,
 	POWER_SUPPLY_PROP_CHARGE_CONTROL_LIMIT,
-	POWER_SUPPLY_PROP_CHARGE_COUNTER,
+	/* POWER_SUPPLY_PROP_CHARGE_COUNTER, */
 	POWER_SUPPLY_PROP_CYCLE_COUNT,
 	POWER_SUPPLY_PROP_RECHARGE_SOC,
 	POWER_SUPPLY_PROP_CHARGE_FULL,
 	POWER_SUPPLY_PROP_FORCE_RECHARGE,
 	POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN,
-	POWER_SUPPLY_PROP_TIME_TO_FULL_NOW,
+	/* POWER_SUPPLY_PROP_TIME_TO_FULL_NOW, */
 	POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE,
+	POWER_SUPPLY_PROP_CAPACITY_LEVEL,
+	POWER_SUPPLY_PROP_CHARGING_ENABLED,
+	POWER_SUPPLY_PROP_HAVE_EXFG,
+	POWER_SUPPLY_PROP_DEBUG_TEMP,
 };
 
 #define DEBUG_ACCESSORY_TEMP_DECIDEGC	250
@@ -1780,7 +1792,7 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 		val->intval = chg->sw_jeita_enabled;
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
-		rc = smblib_get_prop_from_bms(chg,
+		rc = smblib_get_prop_from_exfg(chg,
 				POWER_SUPPLY_PROP_VOLTAGE_NOW, val);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
@@ -1795,7 +1807,10 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 				QNOVO_VOTER);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_NOW:
-		rc = smblib_get_batt_current_now(chg, val);
+		rc = smblib_get_prop_from_exfg(chg,
+				POWER_SUPPLY_PROP_CURRENT_NOW, val);
+		if (!rc)
+			val->intval *= (-1);
 		break;
 	case POWER_SUPPLY_PROP_CURRENT_QNOVO:
 		val->intval = get_client_vote_locked(chg->fcc_votable,
@@ -1812,11 +1827,20 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 		rc = smblib_get_prop_batt_iterm(chg, val);
 		break;
 	case POWER_SUPPLY_PROP_TEMP:
-		if (chg->typec_mode == POWER_SUPPLY_TYPEC_SINK_DEBUG_ACCESSORY)
-			val->intval = DEBUG_ACCESSORY_TEMP_DECIDEGC;
-		else
-			rc = smblib_get_prop_from_bms(chg,
+		//if (chg->typec_mode == POWER_SUPPLY_TYPEC_SINK_DEBUG_ACCESSORY)
+		//	val->intval = DEBUG_ACCESSORY_TEMP_DECIDEGC;
+		//else
+			rc = smblib_get_prop_from_exfg(chg,
 						POWER_SUPPLY_PROP_TEMP, val);
+		if(__debug_flag) {
+			val->intval = chg->debug_temp;
+		}
+		break;
+	case POWER_SUPPLY_PROP_DEBUG_TEMP:
+		val->intval = chg->debug_temp;
+		if (__debug_flag) {
+			power_supply_changed(chg->exfg_psy);
+		}
 		break;
 	case POWER_SUPPLY_PROP_TECHNOLOGY:
 		val->intval = POWER_SUPPLY_TECHNOLOGY_LION;
@@ -1827,6 +1851,14 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_PARALLEL_DISABLE:
 		val->intval = get_client_vote(chg->pl_disable_votable,
 					      USER_VOTER);
+		break;
+	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
+		val->intval = get_client_vote(chg->chg_disable_votable,
+					      USER_VOTER);
+		if (val->intval < 0) /* no votes */
+			val->intval = 1;
+		else
+			val->intval = !val->intval;
 		break;
 	case POWER_SUPPLY_PROP_SET_SHIP_MODE:
 		/* Not in ship mode as long as device is active */
@@ -1841,12 +1873,13 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_RERUN_AICL:
 		val->intval = 0;
 		break;
+	/*
 	case POWER_SUPPLY_PROP_CHARGE_COUNTER:
 		rc = smblib_get_prop_from_bms(chg,
-				POWER_SUPPLY_PROP_CHARGE_COUNTER, val);
-		break;
+				POWER_SUPPLY_PROP_CHARGE_NOW, val);
+		break; */
 	case POWER_SUPPLY_PROP_CYCLE_COUNT:
-		rc = smblib_get_prop_from_bms(chg,
+		rc = smblib_get_prop_from_exfg(chg,
 				POWER_SUPPLY_PROP_CYCLE_COUNT, val);
 		break;
 	case POWER_SUPPLY_PROP_RECHARGE_SOC:
@@ -1864,22 +1897,30 @@ static int smb5_batt_get_prop(struct power_supply *psy,
 					chg->qnovo_disable_votable);
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL:
-		rc = smblib_get_prop_from_bms(chg,
+		rc = smblib_get_prop_from_exfg(chg,
 				POWER_SUPPLY_PROP_CHARGE_FULL, val);
 		break;
 	case POWER_SUPPLY_PROP_FORCE_RECHARGE:
 		val->intval = 0;
 		break;
 	case POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN:
-		rc = smblib_get_prop_from_bms(chg,
+		rc = smblib_get_prop_from_exfg(chg,
 				POWER_SUPPLY_PROP_CHARGE_FULL_DESIGN, val);
 		break;
+	/*
 	case POWER_SUPPLY_PROP_TIME_TO_FULL_NOW:
-		rc = smblib_get_prop_from_bms(chg,
+		rc = smblib_get_prop_from_exfg(chg,
 				POWER_SUPPLY_PROP_TIME_TO_FULL_NOW, val);
-		break;
+		break;*/
 	case POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
 		val->intval = chg->fcc_stepper_enable;
+		break;
+	case POWER_SUPPLY_PROP_CAPACITY_LEVEL:
+		rc = smblib_get_prop_from_exfg(chg,
+				POWER_SUPPLY_PROP_CAPACITY_LEVEL, val);
+		break;
+	case POWER_SUPPLY_PROP_HAVE_EXFG:
+		smblib_get_prop_exfg_use(chg, val);
 		break;
 	default:
 		pr_err("batt power supply prop %d not supported\n", psp);
@@ -1916,6 +1957,9 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 		break;
 	case POWER_SUPPLY_PROP_PARALLEL_DISABLE:
 		vote(chg->pl_disable_votable, USER_VOTER, (bool)val->intval, 0);
+		break;
+	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
+		vote(chg->chg_disable_votable, USER_VOTER, (bool)!val->intval, 0);
 		break;
 	case POWER_SUPPLY_PROP_VOLTAGE_MAX:
 		chg->batt_profile_fv_uv = val->intval;
@@ -1988,6 +2032,9 @@ static int smb5_batt_set_prop(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_FCC_STEPPER_ENABLE:
 		chg->fcc_stepper_enable = val->intval;
 		break;
+	case POWER_SUPPLY_PROP_DEBUG_TEMP:
+		chg->debug_temp = val->intval;
+		break;
 	default:
 		rc = -EINVAL;
 	}
@@ -2009,6 +2056,8 @@ static int smb5_batt_prop_is_writeable(struct power_supply *psy,
 	case POWER_SUPPLY_PROP_INPUT_CURRENT_LIMITED:
 	case POWER_SUPPLY_PROP_STEP_CHARGING_ENABLED:
 	case POWER_SUPPLY_PROP_DIE_HEALTH:
+	case POWER_SUPPLY_PROP_CHARGING_ENABLED:
+	case POWER_SUPPLY_PROP_DEBUG_TEMP:
 		return 1;
 	default:
 		break;
@@ -2958,6 +3007,28 @@ static int smb5_init_hw(struct smb5 *chip)
 		}
 	}
 
+	/* Version compatible : version >= HW_PLATFORM_DVT1_2 */
+	if (hw_get_platform_type() >=  HW_PLATFORM_DVT1_2) {
+		/* Enable AFVC curcuit in analog && Enable AFVC curcuit in TAPER mode */
+		rc = smblib_masked_write(chg, CHGR_AUTO_FLOAT_VOLTAGE_COMPENSATION_REG,
+			EN_AFVC_BIT | EN_TAPER_AFVC_BIT, EN_AFVC_BIT | EN_TAPER_AFVC_BIT);
+		if (rc < 0) {
+			dev_err(chg->dev, "Couldn't configure CHGR_AUTO_FLOAT_VOLTAGE_COMPENSATION_REG rc=%d\n",
+				rc);
+			return rc;
+		}
+
+		/* Configure the vaule of register storing the internal resistance of the AFVC to 42mOhm */
+		rc = smblib_write(chg, DCDC_AFVC_RESISTANCE_CFG, 0x15); // AFVC resistance value = 2mOhm * 0x15 = 42mOhm
+		if (rc < 0) {
+			dev_err(chg->dev, "Couldn't configure DCDC_AFVC_RESISTANCE_CFG rc=%d\n",
+				rc);
+			return rc;
+		}
+	} else {
+		dev_info(chg->dev, "AFVC is not supported in this version!\n");
+	}
+
 	return rc;
 }
 
@@ -3565,6 +3636,7 @@ static int smb5_probe(struct platform_device *pdev)
 	chg->connector_health = -EINVAL;
 	chg->otg_present = false;
 	chg->main_fcc_max = -EINVAL;
+	chg->debug_temp = 250;
 	mutex_init(&chg->adc_lock);
 
 	chg->regmap = dev_get_regmap(chg->dev->parent, NULL);
@@ -3740,7 +3812,9 @@ static int smb5_probe(struct platform_device *pdev)
 	}
 
 	device_init_wakeup(chg->dev, true);
-
+	#ifdef CONFIG_HW_BOOT_INFO
+	register_hardware_info("PMIC", "PM8150B");
+	#endif
 	pr_info("QPNP SMB5 probed successfully\n");
 
 	return rc;

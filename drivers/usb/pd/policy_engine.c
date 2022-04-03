@@ -1160,6 +1160,10 @@ static void phy_msg_received(struct usbpd *pd, enum pd_sop_type sop,
 			msg_to_string(msg_type, num_objs,
 				PD_MSG_HDR_IS_EXTENDED(header)),
 			msg_type, num_objs);
+       if (strcmp(msg_to_string(msg_type, num_objs, PD_MSG_HDR_IS_EXTENDED(header)), "Alert") == 0) {
+		usbpd_err(&pd->dev, "if Alert message receied,return\n");
+		return;
+	}
 
 	if (!PD_MSG_HDR_IS_EXTENDED(header)) {
 		rx_msg = kzalloc(sizeof(*rx_msg) + len, GFP_ATOMIC);
@@ -1249,7 +1253,7 @@ static void log_decoded_request(struct usbpd *pd, u32 rdo)
 		break;
 
 	case PD_SRC_PDO_TYPE_AUGMENTED:
-		usbpd_dbg(&pd->dev, "Request PPS PDO:%d Volt:%dmV Curr:%dmA\n",
+		usbpd_err(&pd->dev, "Request PPS PDO:%d Volt:%dmV Curr:%dmA\n",
 				pos,
 				PD_RDO_PROG_VOLTAGE(rdo) * 20,
 				PD_RDO_PROG_CURR(rdo) * 50);
@@ -2945,8 +2949,9 @@ static bool handle_data_snk_ready(struct usbpd *pd, struct rx_msg *rx_msg)
 		 * multiple Alerts. 150ms should be enough to not get
 		 * in the way of any other AMS that might happen.
 		 */
-		pd->send_get_status = true;
-		kick_sm(pd, 150);
+		usbpd_dbg(&pd->dev, "ignor alert");
+		//pd->send_get_status = true;
+		//kick_sm(pd, 150);
 		break;
 	case MSG_BATTERY_STATUS:
 		if (rx_msg->data_len != sizeof(pd->battery_sts_dobj)) {

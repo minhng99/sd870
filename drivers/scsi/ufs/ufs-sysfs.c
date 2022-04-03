@@ -210,6 +210,45 @@ static ssize_t auto_hibern8_store(struct device *dev,
 	return count;
 }
 
+static int next_power_of_2(int num)
+{
+	if (num <= 0 || num > (1<<30)) {
+                pr_err("max:%d, min:0\n", (1<<30));
+		return -1;
+        }
+
+	num -= 1;
+	num |= num >> 16;
+	num |= num >> 8;
+	num |= num >> 4;
+	num |= num >> 2;
+	num |= num >> 1;
+
+	return num+1;
+}
+
+static ssize_t size_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct ufs_hba *hba = dev_get_drvdata(dev);
+	int err, size;
+	u8 desc_buf[8] = {0};
+        u64 val = 0, temp_size;
+
+	pm_runtime_get_sync(hba->dev);
+        err = ufshcd_read_desc_param(hba, QUERY_DESC_IDN_GEOMETRY, 0, GEOMETRY_DESC_PARAM_DEV_CAP, desc_buf, 8);
+	pm_runtime_put_sync(hba->dev);
+
+        val = get_unaligned_be64(desc_buf);
+
+        temp_size = (val * 512)/(1024*1024*1024);
+	size = next_power_of_2(temp_size);
+        pr_err("=====%x %d, %d\n", val, temp_size, size);
+
+        return sprintf(buf, "%d", size);
+}
+
+static DEVICE_ATTR_RO(size);
 static DEVICE_ATTR_RW(rpm_lvl);
 static DEVICE_ATTR_RO(rpm_target_dev_state);
 static DEVICE_ATTR_RO(rpm_target_link_state);
@@ -226,6 +265,7 @@ static struct attribute *ufs_sysfs_ufshcd_attrs[] = {
 	&dev_attr_spm_target_dev_state.attr,
 	&dev_attr_spm_target_link_state.attr,
 	&dev_attr_auto_hibern8.attr,
+	&dev_attr_size.attr,
 	NULL
 };
 

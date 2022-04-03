@@ -1992,7 +1992,13 @@ static inline bool __allow_reserved_blocks(struct f2fs_sb_info *sbi,
 		return false;
 	if (IS_NOQUOTA(inode))
 		return true;
+	///FW: STORAGE reserved space 20201203 1-4 start @{
+	/*
+	original codes
 	if (uid_eq(F2FS_OPTION(sbi).s_resuid, current_fsuid()))
+	*/
+	if (uid_gte(F2FS_OPTION(sbi).s_resuid, current_fsuid()))
+	///FW: STORAGE reserved space 20201203 1-4 end @}
 		return true;
 	if (!gid_eq(F2FS_OPTION(sbi).s_resgid, GLOBAL_ROOT_GID) &&
 					in_group_p(F2FS_OPTION(sbi).s_resgid))

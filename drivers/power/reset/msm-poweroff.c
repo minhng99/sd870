@@ -230,6 +230,16 @@ static int dload_set(const char *val, const struct kernel_param *kp)
 		return -EINVAL;
 	}
 
+#ifdef CONFIG_HW_PM_DEBUG
+	/* KPDPWR S1:6720 S2:2000  COMBO KEY:4480 S2:2000
+	   Stage Reset: KPDPWR+RESIN
+	   <6480	NOTHING
+	   6480~8720 	WARMRESET
+	   >8720 	SHUTDOWN(KPDPWR)
+	 SHOULD NOT Press COMBO KEY > 8720ms to Catch Ramdump with dload enable */
+	qpnp_pon_kpwr_resin_warm_rst_config(4480, 2000, !!download_mode);
+#endif /* CONFIG_HW_PM_DEBUG */
+
 	set_dload_mode(download_mode);
 
 	return 0;

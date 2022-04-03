@@ -88,6 +88,11 @@ enum {
 
 #define CHGR_FLOAT_VOLTAGE_CFG_REG		(CHGR_BASE + 0x70)
 
+// Reg to enable AFVC function  ---->  (0x1071)
+#define CHGR_AUTO_FLOAT_VOLTAGE_COMPENSATION_REG (CHGR_BASE + 0x71)
+#define EN_TAPER_AFVC_BIT                       BIT(5)
+#define EN_AFVC_BIT                             BIT(6)
+
 #define CHARGE_INHIBIT_THRESHOLD_CFG_REG	(CHGR_BASE + 0x72)
 #define CHARGE_INHIBIT_THRESHOLD_MASK		GENMASK(1, 0)
 #define INHIBIT_ANALOG_VFLT_MINUS_50MV		0
@@ -100,6 +105,9 @@ enum {
 #define CHGR_ADC_RECHARGE_THRESHOLD_MSB_REG	(CHGR_BASE + 0x7E)
 
 #define CHGR_ADC_RECHARGE_THRESHOLD_LSB_REG	(CHGR_BASE + 0x7F)
+
+// Reg to configure AFVC internal resistance ----> (0x118B)
+#define DCDC_AFVC_RESISTANCE_CFG                (DCDC_BASE + 0x8B)
 
 #define JEITA_EN_CFG_REG			(CHGR_BASE + 0x90)
 #define JEITA_EN_HOT_SL_FCV_BIT			BIT(3)

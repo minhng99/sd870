@@ -27,7 +27,8 @@
 #include <linux/poll.h>
 #include <linux/timekeeping.h>
 #include <uapi/linux/gpio.h>
-
+#include <linux/string.h>
+#include <linux/bootinfo.h>
 #include "gpiolib.h"
 
 #define CREATE_TRACE_POINTS
@@ -4456,9 +4457,12 @@ static int gpiolib_seq_show(struct seq_file *s, void *v)
 		seq_printf(s, ", can sleep");
 	seq_printf(s, ":\n");
 
-	if (chip->dbg_show)
-		chip->dbg_show(s, chip);
-	else
+	if (chip->dbg_show) {
+		if(!strstr(chip->label, "lpi_pinctrl")) {
+			chip->dbg_show(s, chip);
+		}
+	}
+	//else
 		gpiolib_dbg_show(s, gdev);
 
 	return 0;
@@ -4494,3 +4498,31 @@ static int __init gpiolib_debugfs_init(void)
 subsys_initcall(gpiolib_debugfs_init);
 
 #endif	/* DEBUG_FS */
+
+
+
+/* Qcom disable DEBUG_FS by kconfig merge for user build.
+   So gpio dump works only in debug build by now(dbg_show).
+   Should split it from debug fs later */
+#ifdef CONFIG_HW_PM_DEBUG
+void gpio_debug_print_enabled(void)
+{
+	struct gpio_device *gdev = NULL;
+	struct gpio_chip *chip = NULL;
+
+	if (!hw_pm_debug_enable())
+		return;
+
+	list_for_each_entry(gdev, &gpio_devices, list) {
+		chip = gdev->chip;
+                if ((chip->dbg_show == NULL) ||
+			strstr(chip->label, "lpi_pinctrl"))
+			continue;
+		pr_info("[GPIO] %s , %s: %d - %d\n", dev_name(&gdev->dev),
+			chip->label, gdev->base, gdev->base + gdev->ngpio - 1);
+		chip->dbg_show(NULL, chip);
+	}
+
+}
+EXPORT_SYMBOL(gpio_debug_print_enabled);
+#endif /* CONFIG_HW_PM_DEBUG */

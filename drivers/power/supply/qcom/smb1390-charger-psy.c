@@ -18,6 +18,7 @@
 #include <linux/power_supply.h>
 #include <linux/regmap.h>
 #include <linux/iio/consumer.h>
+#include <linux/bootinfo.h>
 
 #define MISC_CSIR_LSB_REG		0x9F1
 #define MISC_CSIR_MSB_REG		0x9F2
@@ -265,7 +266,9 @@ struct smb_irq {
 	const irq_handler_t	handler;
 	const bool		wake;
 };
-
+#ifdef CONFIG_HW_BOOT_INFO
+extern int register_hardware_info(const char *name, const char *model);
+#endif
 static const struct smb_irq smb_irqs[];
 
 static int smb1390_read(struct smb1390 *chip, int reg, int *val)
@@ -971,7 +974,7 @@ static int smb1390_ilim_vote_cb(struct votable *votable, void *data,
 				pr_err("Couldn't change slave ilim  rc=%d\n",
 					rc);
 		}
-
+		ilim_uA = min(ilim_uA, MAX_ILIM_UA);
 		rc = smb1390_set_ilim(chip,
 		      DIV_ROUND_CLOSEST(ilim_uA - 500000, 100000));
 		if (rc < 0) {
@@ -1303,7 +1306,7 @@ static void smb1390_taper_work(struct work_struct *work)
 			if (chip->pl_output_mode == POWER_SUPPLY_PL_OUTPUT_VBAT)
 				fcc_cp_ua = fcc_uA - main_fcc_ua;
 
-			smb1390_dbg(chip, PR_INFO,
+			pr_err(
 				"Taper: fcc_ua=%d fcc_cp_ua=%d fcc_main_ua=%d min_ilim_ua(x2) = %u\n",
 				fcc_uA, fcc_cp_ua, main_fcc_ua,
 				(chip->min_ilim_ua*2));
@@ -1621,13 +1624,25 @@ static int smb1390_parse_dt(struct smb1390 *chip)
 
 	/* Default parallel output configuration is VPH connection */
 	chip->pl_output_mode = POWER_SUPPLY_PL_OUTPUT_VPH;
-	of_property_read_u32(chip->dev->of_node, "qcom,parallel-output-mode",
+
+	if (hw_get_platform_type() == HW_PLATFORM_EVB) {
+		of_property_read_u32(chip->dev->of_node, "qcom,parallel-output-mode",
 			&chip->pl_output_mode);
+	} else {
+		of_property_read_u32(chip->dev->of_node, "qcom,parallel-output-mode-evt",
+			&chip->pl_output_mode);
+	}
 
 	/* Default parallel input configuration is USBMID connection */
 	chip->pl_input_mode = POWER_SUPPLY_PL_USBMID_USBMID;
-	of_property_read_u32(chip->dev->of_node, "qcom,parallel-input-mode",
+
+	if (hw_get_platform_type() == HW_PLATFORM_EVB) {
+		of_property_read_u32(chip->dev->of_node, "qcom,parallel-input-mode",
 			&chip->pl_input_mode);
+	} else {
+		of_property_read_u32(chip->dev->of_node, "qcom,parallel-input-mode-evt",
+			&chip->pl_input_mode);
+	}
 
 	chip->cp_slave_thr_taper_ua = 3 * chip->min_ilim_ua;
 	of_property_read_u32(chip->dev->of_node, "qcom,cp-slave-thr-taper-ua",
@@ -1948,6 +1963,9 @@ static int smb1390_master_probe(struct smb1390 *chip)
 	}
 
 	smb1390_create_debugfs(chip);
+	#ifdef CONFIG_HW_BOOT_INFO
+	register_hardware_info("MASTER_SMB", "MASTER_SMB1390");
+	#endif
 	return 0;
 
 out_notifier:
@@ -2078,6 +2096,9 @@ static int smb1390_slave_probe(struct smb1390 *chip)
 	if (rc < 0)
 		pr_err("Couldn't initialize cps psy rc=%d\n", rc);
 
+	#ifdef CONFIG_HW_BOOT_INFO
+	register_hardware_info("SLAVE_SMB", "SLAVE_SMB1390");
+	#endif
 	return rc;
 }
 
